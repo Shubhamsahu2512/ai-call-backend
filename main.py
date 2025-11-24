@@ -73,24 +73,41 @@ async def start_call(payload: StartCallPayload):
         )
 
 
+# @app.post("/twilio/voice")
+# async def twilio_voice(request: Request):
+#     """
+#     Twilio hits this endpoint when the call is answered.
+#     We reply with TwiML that begins a Media Stream + greeting.
+#     """
+#     vr = VoiceResponse()
+
+#     # Convert https:// → wss://
+#     stream_url = RENDER_BASE_URL.replace("https://", "wss://") + "/media"
+
+#     vr.start().stream(url=stream_url)
+#     vr.say("Hello. This is an automated interviewer. I will ask a few questions.")
+#     vr.pause(length=1)
+#     vr.say("Please say your name after the beep.")
+
+#     return PlainTextResponse(str(vr), media_type="application/xml")
+
 @app.post("/twilio/voice")
-async def twilio_voice(request: Request):
+async def twilio_voice():
     """
-    Twilio hits this endpoint when the call is answered.
-    We reply with TwiML that begins a Media Stream + greeting.
+    Twilio will POST here when the call is answered.
+    We respond with TwiML that starts a Media Stream to our /media websocket.
     """
+    # Build the wss stream URL Twilio should connect to
+    # If RENDER_BASE_URL = "https://ai-call-backend-waxe.onrender.com"
+    # we replace https:// with wss:// and append /media
+    stream_url = RENDER_BASE_URL.replace("https://", "wss://").rstrip("/") + "/media"
+
     vr = VoiceResponse()
-
-    # Convert https:// → wss://
-    stream_url = RENDER_BASE_URL.replace("https://", "wss://") + "/media"
-
+    # start streaming audio to our websocket
     vr.start().stream(url=stream_url)
-    vr.say("Hello. This is an automated interviewer. I will ask a few questions.")
-    vr.pause(length=1)
-    vr.say("Please say your name after the beep.")
-
+    # Optional initial speech to candidate
+    vr.say("Hello. This is an automated interviewer. Please wait while I connect.")
     return PlainTextResponse(str(vr), media_type="application/xml")
-
 
 @app.websocket("/media")
 async def media_ws(websocket: WebSocket):

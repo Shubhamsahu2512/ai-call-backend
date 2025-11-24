@@ -9,6 +9,7 @@ from typing import Optional
 from twilio.rest import Client as TwilioClient
 from dotenv import load_dotenv
 from openai import OpenAI
+from requests.auth import HTTPBasicAuth
 
 # --- Patch pydub for Python 3.13 ---
 import types
@@ -22,10 +23,10 @@ import imageio_ffmpeg as ffmpeg
 # Force pydub to use ffmpeg
 AudioSegment.converter = ffmpeg.get_ffmpeg_exe()
 
+# ---------------- App & Environment ----------------
 load_dotenv()
 app = FastAPI()
 
-# ---------------- Environment variables ----------------
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_FROM = os.getenv("TWILIO_NUMBER")
@@ -91,16 +92,16 @@ async def twilio_process(request: Request):
     input_file = f"input_{uid}.wav"
     reply_file = f"reply_{uid}.mp3"
 
-    # Download Twilio recording robustly
+    # --- Download Twilio recording robustly ---
     try:
-        resp = requests.get(recording_url + ".wav", timeout=10)
+        resp = requests.get(recording_url, auth=HTTPBasicAuth(TWILIO_SID, TWILIO_TOKEN), timeout=10)
         resp.raise_for_status()
         audio_bytes = resp.content
     except Exception as e:
         print("Error downloading Twilio audio:", e)
         return Response("<Response><Say>Failed to download recording.</Say></Response>", media_type="application/xml")
 
-    # Convert to standard WAV using pydub + ffmpeg
+    # --- Convert to standard WAV using pydub + ffmpeg ---
     try:
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
         audio.export(input_file, format="wav")
@@ -108,7 +109,7 @@ async def twilio_process(request: Request):
         print("Error processing audio with pydub:", e)
         return Response("<Response><Say>Failed to process audio.</Say></Response>", media_type="application/xml")
 
-    # Transcribe using OpenAI Whisper
+    # --- Transcribe using OpenAI Whisper ---
     try:
         with open(input_file, "rb") as audio_file:
             transcript = client.audio.transcriptions.create(
@@ -121,7 +122,7 @@ async def twilio_process(request: Request):
         print("OpenAI transcription error:", e)
         user_text = "(transcription failed)"
 
-    # Generate LLM reply
+    # --- Generate LLM reply ---
     try:
         reply = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -136,7 +137,7 @@ async def twilio_process(request: Request):
         print("OpenAI chat error:", e)
         answer = "Sorry, I could not generate a reply."
 
-    # Convert LLM reply to speech (TTS)
+    # --- Convert LLM reply to speech (TTS) ---
     try:
         tts_audio = client.audio.speech.create(
             model="gpt-4o-mini-tts",
@@ -151,7 +152,7 @@ async def twilio_process(request: Request):
 
     audio_url = f"{RENDER_BASE_URL}/{reply_file}"
 
-    # Respond to Twilio with playback + next record
+    # --- Respond to Twilio with playback + next record ---
     twiml = f"""
     <Response>
         <Play>{audio_url}</Play>

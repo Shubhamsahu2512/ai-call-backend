@@ -252,6 +252,13 @@
 #         )
 #     return JSONResponse({"error": "not found"}, status_code=404)
 # main.py
+# === PATCH FOR PYDUB ON PYTHON 3.13+ ===
+# pydub expects 'pyaudioop' which exists only in Python <= 3.12
+import sys
+import audioop  # built-in module
+sys.modules['pyaudioop'] = audioop
+# === END PATCH ===
+
 import os
 import uuid
 import io
@@ -392,3 +399,4 @@ async def serve_tts_audio(filename: str):
     if os.path.exists(filename):
         return FileResponse(filename, media_type="audio/mpeg")
     return JSONResponse({"error": "file not found"}, status_code=404)
+

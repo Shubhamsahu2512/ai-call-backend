@@ -17,6 +17,7 @@ from tts_utils import synthesize_to_mp3
 from save_utils import append_conversation_and_save_excel
 from pydantic import BaseModel
 from typing import Optional
+from fastapi.responses import Response
 
 load_dotenv()
 
@@ -91,23 +92,37 @@ async def start_call(payload: StartCallPayload):
 
 #     return PlainTextResponse(str(vr), media_type="application/xml")
 
+# @app.post("/twilio/voice")
+# async def twilio_voice():
+#     """
+#     Twilio will POST here when the call is answered.
+#     We respond with TwiML that starts a Media Stream to our /media websocket.
+#     """
+#     # Build the wss stream URL Twilio should connect to
+#     # If RENDER_BASE_URL = "https://ai-call-backend-waxe.onrender.com"
+#     # we replace https:// with wss:// and append /media
+#     stream_url = RENDER_BASE_URL.replace("https://", "wss://").rstrip("/") + "/media"
+
+#     vr = VoiceResponse()
+#     # start streaming audio to our websocket
+#     vr.start().stream(url=stream_url)
+#     # Optional initial speech to candidate
+#     vr.say("Hello. This is an automated interviewer. Please wait while I connect.")
+#     return PlainTextResponse(str(vr), media_type="application/xml")
+
+
 @app.post("/twilio/voice")
 async def twilio_voice():
+    twiml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+            <Start>
+                <Stream url="wss://ai-call-backend-waxe.onrender.com/media" />
+            </Start>
+            <Say>Hello. This is an automated interviewer. Please wait while I connect.</Say>
+        </Response>
     """
-    Twilio will POST here when the call is answered.
-    We respond with TwiML that starts a Media Stream to our /media websocket.
-    """
-    # Build the wss stream URL Twilio should connect to
-    # If RENDER_BASE_URL = "https://ai-call-backend-waxe.onrender.com"
-    # we replace https:// with wss:// and append /media
-    stream_url = RENDER_BASE_URL.replace("https://", "wss://").rstrip("/") + "/media"
-
-    vr = VoiceResponse()
-    # start streaming audio to our websocket
-    vr.start().stream(url=stream_url)
-    # Optional initial speech to candidate
-    vr.say("Hello. This is an automated interviewer. Please wait while I connect.")
-    return PlainTextResponse(str(vr), media_type="application/xml")
+    return Response(content=twiml, media_type="application/xml")
 
 @app.websocket("/media")
 async def media_ws(websocket: WebSocket):

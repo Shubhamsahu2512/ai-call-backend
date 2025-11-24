@@ -46,6 +46,10 @@ class StartCallPayload(BaseModel):
     topic: Optional[str] = None
 
 
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
 @app.post("/start_call")
 async def start_call(payload: StartCallPayload):
     """

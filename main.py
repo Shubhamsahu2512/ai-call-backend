@@ -254,11 +254,6 @@
 # main.py
 # === PATCH FOR PYDUB ON PYTHON 3.13+ ===
 # pydub expects 'pyaudioop' which exists only in Python <= 3.12
-import sys
-import audioop  # built-in module
-sys.modules['pyaudioop'] = audioop
-# === END PATCH ===
-
 import os
 import uuid
 import io
@@ -271,6 +266,10 @@ from twilio.rest import Client as TwilioClient
 from dotenv import load_dotenv
 from openai import OpenAI
 from pydub import AudioSegment
+from pydub.utils import which
+
+# Force pydub to use ffmpeg (avoids audioop entirely)
+AudioSegment.converter = which("ffmpeg")
 
 load_dotenv()
 app = FastAPI()
@@ -345,8 +344,8 @@ async def twilio_process(request: Request):
     # Download Twilio recording
     audio_bytes = requests.get(recording_url + ".wav").content
 
-    # Convert to standard WAV using pydub
-    audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+    # Convert to standard WAV using pydub + ffmpeg
+    audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="wav")
     audio.export(input_file, format="wav")
 
     # Transcribe using OpenAI Whisper
@@ -399,4 +398,5 @@ async def serve_tts_audio(filename: str):
     if os.path.exists(filename):
         return FileResponse(filename, media_type="audio/mpeg")
     return JSONResponse({"error": "file not found"}, status_code=404)
+
 

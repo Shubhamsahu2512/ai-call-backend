@@ -1,26 +1,28 @@
-# Base image
+# Use official Python 3.13 image
 FROM python:3.13-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    libsndfile1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for caching
+# Copy requirements.txt first (for caching)
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the app code
-COPY . .
+# Copy application code
+COPY main.py ./
 
-# Expose port Render will use
-ENV PORT=10000
+# Expose the port that Render expects
+ENV PORT 10000
+EXPOSE 10000
 
-# Start the FastAPI app
+# Set environment variables if not provided via Render dashboard
+# ENV TWILIO_ACCOUNT_SID=your_sid
+# ENV TWILIO_AUTH_TOKEN=your_token
+# ENV TWILIO_NUMBER=+1234567890
+# ENV OPENAI_API_KEY=your_openai_key
+# ENV RENDER_BASE_URL=https://your-app.onrender.com
+
+# Command to run the FastAPI app using uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]

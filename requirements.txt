@@ -11,3 +11,4 @@ openpyxl
 gTTS
 websockets
 python-dotenv
+pydub

@@ -254,42 +254,34 @@
 # main.py
 import os
 import uuid
-import json
-import base64
 import requests
-
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse, FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from typing import Optional
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.voice_response import VoiceResponse
 from dotenv import load_dotenv
-
 from openai import OpenAI
-client = OpenAI()
 
 load_dotenv()
 
 app = FastAPI()
 
-# -----------------------------------------------------------
-# ENVIRONMENT VARIABLES
-# -----------------------------------------------------------
+# ---------------- Environment variables ----------------
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_FROM = os.getenv("TWILIO_NUMBER")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-RENDER_BASE_URL = os.getenv("RENDER_BASE_URL")  # e.g., https://ai-call-backend.onrender.com
+RENDER_BASE_URL = os.getenv("RENDER_BASE_URL")  # e.g., https://your-app.onrender.com
 
 if not (TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM and OPENAI_API_KEY and RENDER_BASE_URL):
     print("⚠ WARNING: Some environment variables are missing!")
 
 twilio_client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# -----------------------------------------------------------
-# MODELS
-# -----------------------------------------------------------
+# ---------------- Models ----------------
 class StartCallPayload(BaseModel):
     company: Optional[str] = None
     agent_type: Optional[str] = None
@@ -297,15 +289,12 @@ class StartCallPayload(BaseModel):
     candidate_number: Optional[str] = None
     topic: Optional[str] = None
 
-
+# ---------------- Root ----------------
 @app.get("/")
 def root():
     return {"status": "ok"}
 
-
-# -----------------------------------------------------------
-# 1. START OUTBOUND CALL
-# -----------------------------------------------------------
+# ---------------- Start call ----------------
 @app.post("/start_call")
 async def start_call(payload: StartCallPayload):
     try:
@@ -314,21 +303,13 @@ async def start_call(payload: StartCallPayload):
             from_=TWILIO_FROM,
             url=f"{RENDER_BASE_URL}/twilio/voice"
         )
-
         return {"status": "ok", "call_sid": call.sid}
-
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
-
-# -----------------------------------------------------------
-# 2. TWILIO CALL ANSWERED → Say → Record (NO WebSocket)
-# -----------------------------------------------------------
+# ---------------- Twilio voice endpoint ----------------
 @app.post("/twilio/voice")
 async def twilio_voice():
-    """
-    Initial TwiML when call is answered — for Render FREE PLAN.
-    """
     twiml = f"""
     <Response>
         <Say>Hello. This is an automated interviewer. Please wait while I connect.</Say>
@@ -340,35 +321,29 @@ async def twilio_voice():
     """
     return Response(content=twiml.strip(), media_type="application/xml")
 
-
-# -----------------------------------------------------------
-# 3. PROCESS RECORDED AUDIO → TRANSCRIBE → LLM → TTS → PLAY
-# -----------------------------------------------------------
+# ---------------- Twilio process endpoint ----------------
 @app.post("/twilio/process")
 async def twilio_process(request: Request):
-
     form = await request.form()
     recording_url = form.get("RecordingUrl")
 
     if not recording_url:
         return Response("<Response><Say>No recording received.</Say></Response>", media_type="application/xml")
 
-    # Download the .wav file
+    # Download audio as WAV
     audio_bytes = requests.get(recording_url + ".wav").content
     with open("input.wav", "wb") as f:
         f.write(audio_bytes)
 
-    # -------------------------------
-    # Transcribe using correct STT
-    # -------------------------------
+    # Transcribe using Whisper
     transcript = client.audio.transcriptions.create(
-        model="whisper-1",  # CORRECT transcription model
+        model="whisper-1",
         file=open("input.wav", "rb")
     )
     user_text = transcript.text
     print("📝 TRANSCRIPT:", user_text)
 
-    # Generate LLM reply
+    # LLM reply
     reply = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -379,19 +354,17 @@ async def twilio_process(request: Request):
     answer = reply.choices[0].message["content"]
     print("🤖 AGENT:", answer)
 
-    # Convert reply → speech
+    # TTS
     tts_audio = client.audio.speech.create(
         model="gpt-4o-mini-tts",
         voice="alloy",
         input=answer
     )
-
     with open("reply.mp3", "wb") as f:
         f.write(tts_audio)
 
     audio_url = f"{RENDER_BASE_URL}/reply.mp3"
 
-    # Respond to Twilio with playback + another record
     twiml = f"""
     <Response>
         <Play>{audio_url}</Play>
@@ -401,15 +374,12 @@ async def twilio_process(request: Request):
                 playBeep="true" />
     </Response>
     """
-
     return Response(content=twiml.strip(), media_type="application/xml")
 
-
-# -----------------------------------------------------------
-# 4. STATIC FILE ROUTE FOR REPLY AUDIO
-# -----------------------------------------------------------
+# ---------------- Serve TTS audio ----------------
 @app.get("/reply.mp3")
 async def serve_tts_audio():
     if os.path.exists("reply.mp3"):
         return FileResponse("reply.mp3", media_type="audio/mpeg")
     return JSONResponse({"error": "reply not ready"}, status_code=404)
+

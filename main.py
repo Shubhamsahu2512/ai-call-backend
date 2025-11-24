@@ -1,7 +1,6 @@
 import os
 import uuid
 import io
-import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -10,17 +9,16 @@ from twilio.rest import Client as TwilioClient
 from dotenv import load_dotenv
 from openai import OpenAI
 from requests.auth import HTTPBasicAuth
+import requests
 
 # --- Patch pydub for Python 3.13 ---
 import types
 import sys
 fake_audioop = types.SimpleNamespace()
-sys.modules['pyaudioop'] = fake_audioop  # Avoid ModuleNotFoundError in pydub
+sys.modules['pyaudioop'] = fake_audioop
 
 from pydub import AudioSegment
 import imageio_ffmpeg as ffmpeg
-
-# Force pydub to use ffmpeg
 AudioSegment.converter = ffmpeg.get_ffmpeg_exe()
 
 # ---------------- App & Environment ----------------
@@ -83,9 +81,9 @@ async def twilio_voice():
 @app.post("/twilio/process")
 async def twilio_process(request: Request):
     form = await request.form()
-    recording_url = form.get("RecordingUrl")
+    recording_sid = form.get("RecordingSid")
 
-    if not recording_url:
+    if not recording_sid:
         return Response("<Response><Say>No recording received.</Say></Response>", media_type="application/xml")
 
     uid = uuid.uuid4().hex
@@ -94,6 +92,7 @@ async def twilio_process(request: Request):
 
     # --- Download Twilio recording robustly ---
     try:
+        recording_url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Recordings/{recording_sid}.wav"
         resp = requests.get(recording_url, auth=HTTPBasicAuth(TWILIO_SID, TWILIO_TOKEN), timeout=10)
         resp.raise_for_status()
         audio_bytes = resp.content

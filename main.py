@@ -358,9 +358,11 @@ async def twilio_process(request: Request):
     with open("input.wav", "wb") as f:
         f.write(audio_bytes)
 
-    # Transcribe using OpenAI
+    # -------------------------------
+    # Transcribe using correct STT
+    # -------------------------------
     transcript = client.audio.transcriptions.create(
-        model="gpt-4o-mini-tts",
+        model="whisper-1",  # CORRECT transcription model
         file=open("input.wav", "rb")
     )
     user_text = transcript.text
@@ -411,4 +413,3 @@ async def serve_tts_audio():
     if os.path.exists("reply.mp3"):
         return FileResponse("reply.mp3", media_type="audio/mpeg")
     return JSONResponse({"error": "reply not ready"}, status_code=404)
-

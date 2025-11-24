@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-multipart
+twilio
+openai
+requests
+pydantic
+aiofiles
+python-dotenv
+openpyxl
+gTTS
+websockets
+python-dotenv

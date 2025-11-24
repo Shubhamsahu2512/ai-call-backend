@@ -266,15 +266,16 @@ from twilio.rest import Client as TwilioClient
 from dotenv import load_dotenv
 from openai import OpenAI
 from pydub import AudioSegment
-from pydub.utils import which
+import imageio_ffmpeg as ffmpeg
 
-# Force pydub to use ffmpeg (avoids audioop entirely)
-AudioSegment.converter = which("ffmpeg")
+# ---------------- Pydub ffmpeg setup ----------------
+# Use imageio ffmpeg executable to avoid system dependencies
+AudioSegment.converter = ffmpeg.get_ffmpeg_exe()
 
+# ---------------- Load environment variables ----------------
 load_dotenv()
 app = FastAPI()
 
-# ---------------- Environment variables ----------------
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_FROM = os.getenv("TWILIO_NUMBER")
@@ -392,11 +393,12 @@ async def twilio_process(request: Request):
     """
     return Response(content=twiml.strip(), media_type="application/xml")
 
-# ---------------- Serve TTS audio ----------------
+# ---------------- Serve TTS audio ---------------
 @app.get("/{filename}")
 async def serve_tts_audio(filename: str):
     if os.path.exists(filename):
         return FileResponse(filename, media_type="audio/mpeg")
     return JSONResponse({"error": "file not found"}, status_code=404)
+
 
 

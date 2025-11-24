@@ -12,3 +12,4 @@ gTTS
 websockets
 python-dotenv
 pydub
+imageio[ffmpeg]

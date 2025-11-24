@@ -254,6 +254,7 @@
 # main.py
 import os
 import uuid
+import io
 import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -262,9 +263,9 @@ from typing import Optional
 from twilio.rest import Client as TwilioClient
 from dotenv import load_dotenv
 from openai import OpenAI
+from pydub import AudioSegment
 
 load_dotenv()
-
 app = FastAPI()
 
 # ---------------- Environment variables ----------------
@@ -329,22 +330,25 @@ async def twilio_process(request: Request):
     if not recording_url:
         return Response("<Response><Say>No recording received.</Say></Response>", media_type="application/xml")
 
-    # Use a unique filename per request to avoid overwrites
-    uid = str(uuid.uuid4())
-    input_file = f"input_{uid}.mp3"
+    # Create unique filenames per call
+    uid = uuid.uuid4().hex
+    input_file = f"input_{uid}.wav"
     reply_file = f"reply_{uid}.mp3"
 
-    # Download audio from Twilio as MP3 (Twilio default)
-    audio_bytes = requests.get(recording_url + ".mp3").content
-    with open(input_file, "wb") as f:
-        f.write(audio_bytes)
+    # Download Twilio recording
+    audio_bytes = requests.get(recording_url + ".wav").content
 
-    # Transcribe using Whisper
+    # Convert to standard WAV using pydub
+    audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+    audio.export(input_file, format="wav")
+
+    # Transcribe using OpenAI Whisper
     with open(input_file, "rb") as audio_file:
         transcript = client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file
         )
+
     user_text = transcript.text
     print("📝 TRANSCRIPT:", user_text)
 
@@ -359,7 +363,7 @@ async def twilio_process(request: Request):
     answer = reply.choices[0].message["content"]
     print("🤖 AGENT:", answer)
 
-    # Convert reply → speech
+    # Convert LLM reply to speech
     tts_audio = client.audio.speech.create(
         model="gpt-4o-mini-tts",
         voice="alloy",
@@ -370,6 +374,7 @@ async def twilio_process(request: Request):
 
     audio_url = f"{RENDER_BASE_URL}/{reply_file}"
 
+    # Respond to Twilio with playback + another record
     twiml = f"""
     <Response>
         <Play>{audio_url}</Play>
@@ -382,10 +387,8 @@ async def twilio_process(request: Request):
     return Response(content=twiml.strip(), media_type="application/xml")
 
 # ---------------- Serve TTS audio ----------------
-@app.get("/{file_name}")
-async def serve_tts_audio(file_name: str):
-    if os.path.exists(file_name) and file_name.endswith(".mp3"):
-        return FileResponse(file_name, media_type="audio/mpeg")
+@app.get("/{filename}")
+async def serve_tts_audio(filename: str):
+    if os.path.exists(filename):
+        return FileResponse(filename, media_type="audio/mpeg")
     return JSONResponse({"error": "file not found"}, status_code=404)
-
-

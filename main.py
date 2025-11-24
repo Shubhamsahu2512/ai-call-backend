@@ -18,6 +18,7 @@ from save_utils import append_conversation_and_save_excel
 from pydantic import BaseModel
 from typing import Optional
 from fastapi.responses import Response
+from fastapi import WebSocket
 
 load_dotenv()
 
@@ -124,89 +125,103 @@ async def twilio_voice():
     """
     return Response(content=twiml, media_type="application/xml")
 
-@app.websocket("/media")
-async def media_ws(websocket: WebSocket):
-    """
-    Receive Twilio Media Stream websocket events.
-    """
-    await websocket.accept()
-    print("Websocket connected: Twilio Media Stream")
+# @app.websocket("/media")
+# async def media_ws(websocket: WebSocket):
+#     """
+#     Receive Twilio Media Stream websocket events.
+#     """
+#     await websocket.accept()
+#     print("Websocket connected: Twilio Media Stream")
 
-    call_sid = str(uuid.uuid4())
-    audio_buffer = bytearray()
+#     call_sid = str(uuid.uuid4())
+#     audio_buffer = bytearray()
+
+#     try:
+#         while True:
+#             msg = await websocket.receive_text()
+#             data = json.loads(msg)
+#             event = data.get("event")
+
+#             # ---- CONNECTED ----
+#             if event == "connected":
+#                 print("Connected:", data)
+#                 call_sid = data.get("start", {}).get("callSid", call_sid)
+#                 CONVERSATIONS.setdefault(call_sid, [])
+
+#             # ---- AUDIO MEDIA ----
+#             elif event == "media":
+#                 media = data.get("media", {})
+#                 payload_b64 = media.get("payload")
+
+#                 if payload_b64:
+#                     chunk = base64.b64decode(payload_b64)
+#                     audio_buffer.extend(chunk)
+
+#                 # Flush after ~4 seconds of audio
+#                 if len(audio_buffer) > 16000 * 4:
+#                     audio_bytes = bytes(audio_buffer)
+#                     audio_buffer.clear()
+
+#                     # Transcribe
+#                     try:
+#                         transcription = await transcribe_audio_bytes(audio_bytes)
+#                     except Exception as e:
+#                         transcription = f"(transcription error: {e})"
+
+#                     print("Transcribed:", transcription)
+#                     CONVERSATIONS[call_sid].append(("candidate", transcription))
+
+#                     # LLM reply
+#                     prompt = f"You are an interviewer. Candidate said: {transcription}. Reply succinctly and ask the next question."
+#                     reply = await llm_chat_reply(prompt)
+#                     CONVERSATIONS[call_sid].append(("agent", reply))
+
+#                     # TTS
+#                     mp3_filename = f"{call_sid}_{uuid.uuid4().hex}.mp3"
+#                     mp3_path = await synthesize_to_mp3(reply, mp3_filename)
+
+#                     public_url = f"{RENDER_BASE_URL}/static/replies/{mp3_filename}"
+
+#                     # Try Twilio playback
+#                     try:
+#                         if call_sid.startswith("CA"):
+#                             play_twiml = f"<Response><Play>{public_url}</Play></Response>"
+#                             client.calls(call_sid).update(twiml=play_twiml)
+#                         else:
+#                             print("Unknown Twilio SID. Manual playback:", public_url)
+#                     except Exception as e:
+#                         print("Twilio playback error:", e)
+
+#             # ---- STOP EVENT ----
+#             elif event == "stop":
+#                 print("Stream stopped")
+#                 break
+
+#     except WebSocketDisconnect:
+#         print("WebSocket disconnected")
+
+#     finally:
+#         # Save conversation to Excel
+#         try:
+#             filename = f"call_{call_sid}.xlsx"
+#             append_conversation_and_save_excel(CONVERSATIONS.get(call_sid, []), filename)
+#             print("Saved:", filename)
+#         except Exception as e:
+#             print("Excel save error:", e)
+
+
+
+@app.websocket("/media")
+async def media_stream(websocket: WebSocket):
+    await websocket.accept()
+    print("🔵 Twilio connected to WebSocket!")
 
     try:
         while True:
-            msg = await websocket.receive_text()
-            data = json.loads(msg)
-            event = data.get("event")
-
-            # ---- CONNECTED ----
-            if event == "connected":
-                print("Connected:", data)
-                call_sid = data.get("start", {}).get("callSid", call_sid)
-                CONVERSATIONS.setdefault(call_sid, [])
-
-            # ---- AUDIO MEDIA ----
-            elif event == "media":
-                media = data.get("media", {})
-                payload_b64 = media.get("payload")
-
-                if payload_b64:
-                    chunk = base64.b64decode(payload_b64)
-                    audio_buffer.extend(chunk)
-
-                # Flush after ~4 seconds of audio
-                if len(audio_buffer) > 16000 * 4:
-                    audio_bytes = bytes(audio_buffer)
-                    audio_buffer.clear()
-
-                    # Transcribe
-                    try:
-                        transcription = await transcribe_audio_bytes(audio_bytes)
-                    except Exception as e:
-                        transcription = f"(transcription error: {e})"
-
-                    print("Transcribed:", transcription)
-                    CONVERSATIONS[call_sid].append(("candidate", transcription))
-
-                    # LLM reply
-                    prompt = f"You are an interviewer. Candidate said: {transcription}. Reply succinctly and ask the next question."
-                    reply = await llm_chat_reply(prompt)
-                    CONVERSATIONS[call_sid].append(("agent", reply))
-
-                    # TTS
-                    mp3_filename = f"{call_sid}_{uuid.uuid4().hex}.mp3"
-                    mp3_path = await synthesize_to_mp3(reply, mp3_filename)
-
-                    public_url = f"{RENDER_BASE_URL}/static/replies/{mp3_filename}"
-
-                    # Try Twilio playback
-                    try:
-                        if call_sid.startswith("CA"):
-                            play_twiml = f"<Response><Play>{public_url}</Play></Response>"
-                            client.calls(call_sid).update(twiml=play_twiml)
-                        else:
-                            print("Unknown Twilio SID. Manual playback:", public_url)
-                    except Exception as e:
-                        print("Twilio playback error:", e)
-
-            # ---- STOP EVENT ----
-            elif event == "stop":
-                print("Stream stopped")
-                break
-
-    except WebSocketDisconnect:
-        print("WebSocket disconnected")
-
-    finally:
-        # Save conversation to Excel
-        try:
-            filename = f"call_{call_sid}.xlsx"
-            append_conversation_and_save_excel(CONVERSATIONS.get(call_sid, []), filename)
-            print("Saved:", filename)
-        except Exception as e:
-            print("Excel save error:", e)
+            data = await websocket.receive_text()
+            print("Received:", data)
+    except Exception as e:
+        print("❌ WebSocket closed:", e)
 
 
 @app.get("/static/replies/{filename}")

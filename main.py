@@ -265,22 +265,30 @@ from typing import Optional
 from twilio.rest import Client as TwilioClient
 from dotenv import load_dotenv
 from openai import OpenAI
+
+# --- Patch pydub for Python 3.13 ---
+import types
+import sys
+
+fake_audioop = types.SimpleNamespace()
+sys.modules['pyaudioop'] = fake_audioop  # Prevent ModuleNotFoundError in pydub
+# ------------------------------
+
 from pydub import AudioSegment
 import imageio_ffmpeg as ffmpeg
 
-# ---------------- Pydub ffmpeg setup ----------------
-# Use imageio ffmpeg executable to avoid system dependencies
+# Force pydub to use ffmpeg
 AudioSegment.converter = ffmpeg.get_ffmpeg_exe()
 
-# ---------------- Load environment variables ----------------
 load_dotenv()
 app = FastAPI()
 
+# ---------------- Environment variables ----------------
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_FROM = os.getenv("TWILIO_NUMBER")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-RENDER_BASE_URL = os.getenv("RENDER_BASE_URL")  # e.g., https://your-app.onrender.com
+RENDER_BASE_URL = os.getenv("RENDER_BASE_URL")
 
 if not (TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM and OPENAI_API_KEY and RENDER_BASE_URL):
     print("⚠ WARNING: Some environment variables are missing!")
@@ -337,7 +345,6 @@ async def twilio_process(request: Request):
     if not recording_url:
         return Response("<Response><Say>No recording received.</Say></Response>", media_type="application/xml")
 
-    # Create unique filenames per call
     uid = uuid.uuid4().hex
     input_file = f"input_{uid}.wav"
     reply_file = f"reply_{uid}.mp3"
@@ -345,7 +352,7 @@ async def twilio_process(request: Request):
     # Download Twilio recording
     audio_bytes = requests.get(recording_url + ".wav").content
 
-    # Convert to standard WAV using pydub + ffmpeg
+    # Convert using pydub + ffmpeg
     audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="wav")
     audio.export(input_file, format="wav")
 
@@ -393,12 +400,13 @@ async def twilio_process(request: Request):
     """
     return Response(content=twiml.strip(), media_type="application/xml")
 
-# ---------------- Serve TTS audio ---------------
+# ---------------- Serve TTS audio ----------------
 @app.get("/{filename}")
 async def serve_tts_audio(filename: str):
     if os.path.exists(filename):
         return FileResponse(filename, media_type="audio/mpeg")
     return JSONResponse({"error": "file not found"}, status_code=404)
+
 
 
 

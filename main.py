@@ -112,18 +112,28 @@ async def start_call(payload: StartCallPayload):
 #     return PlainTextResponse(str(vr), media_type="application/xml")
 
 
+# @app.post("/twilio/voice")
+# async def twilio_voice():
+#     twiml = """
+#         <?xml version="1.0" encoding="UTF-8"?>
+#         <Response>
+#             <Start>
+#                 <Stream url="wss://ai-call-backend-waxe.onrender.com/media" />
+#             </Start>
+#             <Say>Hello. This is an automated interviewer. Please wait while I connect.</Say>
+#         </Response>
+#     """
+#     return Response(content=twiml, media_type="application/xml")
+
 @app.post("/twilio/voice")
 async def twilio_voice():
-    twiml = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-            <Start>
-                <Stream url="wss://ai-call-backend-waxe.onrender.com/media" />
-            </Start>
-            <Say>Hello. This is an automated interviewer. Please wait while I connect.</Say>
-        </Response>
-    """
-    return Response(content=twiml, media_type="application/xml")
+    stream_url = RENDER_BASE_URL.replace("https://", "wss://").rstrip("/") + "/media"
+
+    vr = VoiceResponse()
+    vr.start().stream(url=stream_url)
+    vr.say("Hello. This is an automated interviewer. Please wait while I connect.")
+    
+    return PlainTextResponse(str(vr), media_type="application/xml")
 
 # @app.websocket("/media")
 # async def media_ws(websocket: WebSocket):

@@ -1,6 +1,7 @@
 # import os
 # import uuid
 # import io
+# import time
 # from fastapi import FastAPI, Request
 # from fastapi.responses import FileResponse, JSONResponse, Response
 # from pydantic import BaseModel
@@ -77,6 +78,34 @@
 #     """
 #     return Response(content=twiml.strip(), media_type="application/xml")
 
+# # ---------------- Recording Download Helper ----------------
+# def download_twilio_recording(recording_sid: str):
+#     """
+#     Attempts to download Twilio recording with retry logic.
+#     """
+#     recording_url = (
+#         f"https://api.twilio.com/2010-04-01/Accounts/"
+#         f"{TWILIO_SID}/Recordings/{recording_sid}"
+#     )
+
+#     for attempt in range(5):  # retry up to 5 times
+#         print(f"Download attempt {attempt + 1}/5 → {recording_url}")
+
+#         resp = requests.get(
+#             recording_url,
+#             auth=HTTPBasicAuth(TWILIO_SID, TWILIO_TOKEN),
+#             timeout=10
+#         )
+
+#         if resp.status_code == 200:
+#             print("Recording downloaded successfully.")
+#             return resp.content
+
+#         print(f"Recording not ready yet: HTTP {resp.status_code}")
+#         time.sleep(1.2)
+
+#     raise Exception(f"Recording still unavailable after retries. Last status={resp.status_code}")
+
 # # ---------------- Twilio process endpoint ----------------
 # @app.post("/twilio/process")
 # async def twilio_process(request: Request):
@@ -92,20 +121,17 @@
 
 #     # --- Download Twilio recording robustly ---
 #     try:
-#         recording_url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Recordings/{recording_sid}.wav"
-#         resp = requests.get(recording_url, auth=HTTPBasicAuth(TWILIO_SID, TWILIO_TOKEN), timeout=10)
-#         resp.raise_for_status()
-#         audio_bytes = resp.content
+#         audio_bytes = download_twilio_recording(recording_sid)
 #     except Exception as e:
-#         print("Error downloading Twilio audio:", e)
+#         print("❌ Error downloading Twilio audio:", e)
 #         return Response("<Response><Say>Failed to download recording.</Say></Response>", media_type="application/xml")
 
-#     # --- Convert to standard WAV using pydub + ffmpeg ---
+#     # --- Convert Twilio audio → WAV ---
 #     try:
 #         audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
 #         audio.export(input_file, format="wav")
 #     except Exception as e:
-#         print("Error processing audio with pydub:", e)
+#         print("❌ Error processing audio with pydub:", e)
 #         return Response("<Response><Say>Failed to process audio.</Say></Response>", media_type="application/xml")
 
 #     # --- Transcribe using OpenAI Whisper ---
@@ -118,7 +144,7 @@
 #         user_text = transcript.text
 #         print("📝 TRANSCRIPT:", user_text)
 #     except Exception as e:
-#         print("OpenAI transcription error:", e)
+#         print("❌ OpenAI transcription error:", e)
 #         user_text = "(transcription failed)"
 
 #     # --- Generate LLM reply ---
@@ -133,10 +159,10 @@
 #         answer = reply.choices[0].message["content"]
 #         print("🤖 AGENT:", answer)
 #     except Exception as e:
-#         print("OpenAI chat error:", e)
+#         print("❌ OpenAI chat error:", e)
 #         answer = "Sorry, I could not generate a reply."
 
-#     # --- Convert LLM reply to speech (TTS) ---
+#     # --- Convert LLM reply to speech ---
 #     try:
 #         tts_audio = client.audio.speech.create(
 #             model="gpt-4o-mini-tts",
@@ -144,9 +170,9 @@
 #             input=answer
 #         )
 #         with open(reply_file, "wb") as f:
-#             f.write(tts_audio)
+#             f.write(tts_audio)  # raw bytes
 #     except Exception as e:
-#         print("TTS generation error:", e)
+#         print("❌ TTS generation error:", e)
 #         return Response("<Response><Say>Failed to generate audio reply.</Say></Response>", media_type="application/xml")
 
 #     audio_url = f"{RENDER_BASE_URL}/{reply_file}"
@@ -253,15 +279,12 @@ async def twilio_voice():
 
 # ---------------- Recording Download Helper ----------------
 def download_twilio_recording(recording_sid: str):
-    """
-    Attempts to download Twilio recording with retry logic.
-    """
     recording_url = (
         f"https://api.twilio.com/2010-04-01/Accounts/"
         f"{TWILIO_SID}/Recordings/{recording_sid}"
     )
 
-    for attempt in range(5):  # retry up to 5 times
+    for attempt in range(5):
         print(f"Download attempt {attempt + 1}/5 → {recording_url}")
 
         resp = requests.get(
@@ -292,14 +315,14 @@ async def twilio_process(request: Request):
     input_file = f"input_{uid}.wav"
     reply_file = f"reply_{uid}.mp3"
 
-    # --- Download Twilio recording robustly ---
+    # --- Download Twilio recording ---
     try:
         audio_bytes = download_twilio_recording(recording_sid)
     except Exception as e:
         print("❌ Error downloading Twilio audio:", e)
         return Response("<Response><Say>Failed to download recording.</Say></Response>", media_type="application/xml")
 
-    # --- Convert Twilio audio → WAV ---
+    # --- Convert to WAV ---
     try:
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
         audio.export(input_file, format="wav")
@@ -307,7 +330,7 @@ async def twilio_process(request: Request):
         print("❌ Error processing audio with pydub:", e)
         return Response("<Response><Say>Failed to process audio.</Say></Response>", media_type="application/xml")
 
-    # --- Transcribe using OpenAI Whisper ---
+    # --- Transcribe using Whisper ---
     try:
         with open(input_file, "rb") as audio_file:
             transcript = client.audio.transcriptions.create(
@@ -329,28 +352,30 @@ async def twilio_process(request: Request):
                 {"role": "user", "content": user_text}
             ]
         )
-        answer = reply.choices[0].message["content"]
+        answer = reply.choices[0].message.content
         print("🤖 AGENT:", answer)
     except Exception as e:
         print("❌ OpenAI chat error:", e)
         answer = "Sorry, I could not generate a reply."
 
-    # --- Convert LLM reply to speech ---
+    # --- Convert reply to speech ---
     try:
-        tts_audio = client.audio.speech.create(
+        speech = client.audio.speech.create(
             model="gpt-4o-mini-tts",
             voice="alloy",
             input=answer
         )
+
         with open(reply_file, "wb") as f:
-            f.write(tts_audio)  # raw bytes
+            f.write(speech.read())
+
     except Exception as e:
         print("❌ TTS generation error:", e)
         return Response("<Response><Say>Failed to generate audio reply.</Say></Response>", media_type="application/xml")
 
     audio_url = f"{RENDER_BASE_URL}/{reply_file}"
 
-    # --- Respond to Twilio with playback + next record ---
+    # --- Play audio + continue recording ---
     twiml = f"""
     <Response>
         <Play>{audio_url}</Play>
